@@ -428,6 +428,121 @@ cv2.destroyAllWindows()
 
 
 
+#include <iostream>
+#include <vector>
+#include <opencv2/opencv.hpp>
+#include "tensorflow/lite/interpreter.h"
+#include "tensorflow/lite/kernels/register.h"
+#include "tensorflow/lite/model.h"
+
+// Function to perform Non-Maximum Suppression (NMS)
+std::vector<int> nonMaxSuppression(const std::vector<cv::Rect>& boxes, const std::vector<float>& confidences, float iouThreshold) {
+    std::vector<int> indices;
+    cv::dnn::NMSBoxes(boxes, confidences, 0.0, iouThreshold, indices);
+    return indices;
+}
+
+int main() {
+    // Load the TFLite model
+    const char* modelPath = "D:/YOLO_Test/Working_yolo_model/best_saved_model/best_float32.tflite";
+    auto model = tflite::FlatBufferModel::BuildFromFile(modelPath);
+    if (!model) {
+        std::cerr << "Failed to load model\n";
+        return -1;
+    }
+
+    // Build the interpreter
+    tflite::ops::builtin::BuiltinOpResolver resolver;
+    tflite::InterpreterBuilder builder(*model, resolver);
+    std::unique_ptr<tflite::Interpreter> interpreter;
+    builder(&interpreter);
+    if (!interpreter) {
+        std::cerr << "Failed to construct interpreter\n";
+        return -1;
+    }
+
+    // Allocate tensor buffers
+    if (interpreter->AllocateTensors() != kTfLiteOk) {
+        std::cerr << "Failed to allocate tensors\n";
+        return -1;
+    }
+
+    // Get input tensor information
+    int inputIndex = interpreter->inputs()[0];
+    TfLiteIntArray* dims = interpreter->tensor(inputIndex)->dims;
+    int inputHeight = dims->data[1];
+    int inputWidth = dims->data[2];
+    int inputChannels = dims->data[3];
+
+    // Load and preprocess the image
+    cv::Mat image = cv::imread("D:/Frames/Minecraft/Frame_Minecraft_ [svCzpPRRj4M]_6635.jpg");
+    if (image.empty()) {
+        std::cerr << "Image not found\n";
+        return -1;
+    }
+    cv::Mat resizedImage;
+    cv::resize(image, resizedImage, cv::Size(inputWidth, inputHeight));
+    resizedImage.convertTo(resizedImage, CV_32FC3, 1.0 / 255);
+
+    // Set input tensor data
+    float* inputTensor = interpreter->typed_tensor<float>(inputIndex);
+    std::memcpy(inputTensor, resizedImage.data, resizedImage.total() * resizedImage.elemSize());
+
+    // Run inference
+    if (interpreter->Invoke() != kTfLiteOk) {
+        std::cerr << "Failed to invoke tflite\n";
+        return -1;
+    }
+
+    // Process output tensors
+    int outputIndex = interpreter->outputs()[0];
+    float* outputData = interpreter->typed_output_tensor<float>(outputIndex);
+
+    // Assuming output tensor shape is [1, num_boxes, 7] with each box having [x, y, w, h, confidence, class_id]
+    int numBoxes = interpreter->tensor(outputIndex)->dims->data[1];
+    std::vector<cv::Rect> boxes;
+    std::vector<float> confidences;
+    std::vector<int> classIds;
+
+    for (int i = 0; i < numBoxes; ++i) {
+        float x = outputData[i * 7 + 0];
+        float y = outputData[i * 7 + 1];
+        float w = outputData[i * 7 + 2];
+        float h = outputData[i * 7 + 3];
+        float confidence = outputData[i * 7 + 4];
+        int classId = static_cast<int>(outputData[i * 7 + 5]);
+
+        if (confidence > 0.6) { // Confidence threshold
+            int left = static_cast<int>((x - w / 2) * image.cols);
+            int top = static_cast<int>((y - h / 2) * image.rows);
+            int width = static_cast<int>(w * image.cols);
+            int height = static_cast<int>(h * image.rows);
+            boxes.emplace_back(left, top, width, height);
+            confidences.push_back(confidence);
+            classIds.push_back(classId);
+        }
+    }
+
+    // Apply Non-Maximum Suppression
+    std::vector<int> nmsIndices = nonMaxSuppression(boxes, confidences, 0.5);
+
+    // Draw bounding boxes
+    for (int idx : nmsIndices) {
+        cv::rectangle(image, boxes[idx], cv::Scalar(0, 255, 0), 2);
+        std::string label = "Class " + std::to_string(classIds[idx]) + " (" + std::to_string(confidences[idx]) + ")";
+        int baseLine;
+        cv::Size labelSize = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
+        int top = std::max(boxes[idx].y, labelSize.height);
+        cv::putText(image, label, cv::Point(boxes[idx].x, top), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+    }
+
+    // Display the image
+    cv::imshow("Detected Objects", image);
+    cv::waitKey(0);
+    cv::destroyAllWindows();
+
+    return 0;
+}
 
 
 
