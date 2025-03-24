@@ -634,3 +634,78 @@ int main() {
 #             print(f"Detected object {class_id} with confidence {final_score:.2f} at [{x_min}, {y_min}, {x_max}, {y_max}]")
 
 
+
+
+import torch
+import torch.nn as nn
+import os
+from torchvision import transforms
+from PIL import Image
+import timm
+import numpy as np
+from safetensors.torch import load_file
+import plotly.express as px
+from sklearn.manifold import TSNE
+import psutil
+import time
+os.environ["TRANSFORMER_OFFLINE"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+# Load MobileViT model
+mobilevit = timm.create_model(
+    'mobilevitv2_075.cvnets_in1k',
+    pretrained=False,
+    num_classes=0  # Remove classifier
+)
+
+model_path = r"D:\Mobile_Vit\mobilevitv2_075.cvnets_in1k\mobilevitv2_075.cvnets_in1k\model.safetensors"  # Change to "pytorch_model.bin" if using bin file
+if model_path.endswith(".safetensors"):
+    state_dict = load_file(model_path)  # Load from safetensors
+else:
+    state_dict = torch.load(model_path, map_location="cpu")  # Load from bin file
+
+# Remove classifier layer keys
+filtered_state_dict = {k: v for k, v in state_dict.items() if not k.startswith("head.fc")}
+mobilevit.load_state_dict(filtered_state_dict, strict=False)  # Allow missing keys
+
+mobilevit.eval()
+
+# Define Projection Layer (384 → 512)
+projection_layer = nn.Linear(384, 512).to("cpu")
+
+# Load saved model
+checkpoint = torch.load("distilled_mobilevit.pth")
+mobilevit.load_state_dict(checkpoint["mobilevit_state_dict"])
+projection_layer.load_state_dict(checkpoint["projection_layer_state_dict"])
+
+# Set models to evaluation mode
+mobilevit.eval()
+projection_layer.eval()
+
+# Define preprocessing transform (same as used in training)
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    # transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+])
+
+image_path = r"D:\Mobile_Vit\embedding_dataset\black_myth_wukong_[0jFxQF4HPfM]_90055.jpg"
+
+image = Image.open(image_path).convert("RGB")
+print(type(image))
+image_tensor = transform(image).unsqueeze(0).to("cpu")  # Shape: (1, 3, 224, 224)
+
+# Extract embeddings using distilled MobileViT
+with torch.no_grad():
+    student_embeddings = mobilevit.forward_features(image_tensor)
+    student_embeddings = mobilevit.forward_head(student_embeddings, pre_logits=True)  # Shape: (1, 384)
+    student_embeddings = projection_layer(student_embeddings).squeeze().cpu().numpy()  # Shape: (512,)
+
+
+print(student_embeddings)
+
+
+
+
+
+
+
