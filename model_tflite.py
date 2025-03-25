@@ -1,3 +1,24 @@
+std::vector<cv::Rect> boxes;
+    std::vector<float> scores;
+    std::vector<int> indices;
+
+    for (const auto& det : detections) {
+        boxes.push_back(std::get<0>(det));
+        scores.push_back(std::get<2>(det));
+    }
+
+    // Apply OpenCV's built-in NMS
+    cv::dnn::NMSBoxes(boxes, scores, CONF_THRESHOLD, IOU_THRESHOLD, indices);
+
+    std::vector<std::tuple<cv::Rect, int, float>> filtered_detections;
+    for (int idx : indices) {
+        filtered_detections.push_back(detections[idx]);
+    }
+
+    return filtered_detections;
+
+
+
 import tensorflow as tf
 import cv2
 
