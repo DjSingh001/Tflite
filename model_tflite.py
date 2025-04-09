@@ -1,3 +1,351 @@
+#include <windows.h>
+#include <psapi.h>
+#include <iostream>
+#include <string>
+#include <memory>
+#include <opencv2/opencv.hpp>
+#include "tensorflow/lite/model.h"
+#include "tensorflow/lite/interpreter.h"
+#include "tensorflow/lite/kernels/register.h"
+//#include "tensorflow/lite/c/common.h"
+#include "tensorflow/lite/c/c_api_internal.h"
+#include "tensorflow/lite/optional_debug_tools.h"
+
+
+
+// YOLOv8 Model Configurations
+const int INPUT_WIDTH = 640;
+const int INPUT_HEIGHT = 640;
+const int num_attributes = 77;  // Output shape [1, 81, 8400] -> 81 - 4 = 77 classes
+const int NUM_DETECTIONS = 8400;
+const float CONF_THRESHOLD = 0.60f;
+const float IOU_THRESHOLD = 0.45f;
+
+void PrintMemoryUsage() {
+    PROCESS_MEMORY_COUNTERS memCounter;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &memCounter, sizeof(memCounter))) {
+        std::cout << "Memory Usage: " << memCounter.WorkingSetSize / (1024 * 1024) << " MB" << std::endl;
+    }
+}
+
+cv::Mat letterbox(const cv::Mat& image, int target_size = 640) {
+    std::cout << "Letter Boxing started.\n";
+    int original_width = image.cols;
+    int original_height = image.rows;
+    float aspect_ratio = static_cast<float>(original_width) / original_height;
+    // std::cout << "Original Aspect -> Width:" << original_width << " | Height: " << original_height << std::endl;
+    // std::cout << "Aspect Ratio: " << aspect_ratio << std::endl;
+    int new_width, new_height;
+    if (aspect_ratio >= 1) {
+        new_width = target_size;
+        new_height = static_cast<int>(target_size / aspect_ratio);
+    }
+    else {
+        new_height = target_size;
+        new_width = static_cast<int>(target_size * aspect_ratio);
+    }
+
+    // std::cout << "New Aspect -> Width:" << new_width << " | Height: " << new_height << std::endl;
+
+    cv::Mat resized_image;
+    cv::resize(image, resized_image, cv::Size(new_width, new_height));
+
+    int top = (target_size - new_height) / 2;
+    int bottom = target_size - new_height - top;
+    int left = (target_size - new_width) / 2;
+    int right = target_size - new_width - left;
+
+    cv::Mat padded_image;
+    cv::copyMakeBorder(resized_image, padded_image, top, bottom, left, right, cv::BORDER_CONSTANT, cv::Scalar(114, 114, 114));
+
+    // std::cout << "Letter Boxing done.\n";
+
+    return padded_image;
+}
+
+// Function to preprocess the image for YOLOv8
+cv::Mat preprocessImage(const cv::Mat& image) {
+    cv::Mat img1, img2, img3;
+
+    //Letterboxing
+
+    img1 = letterbox(image);
+
+    // Convert BGR to RGB (YOLOv8 expects RGB input)
+
+    cv::cvtColor(img1, img1, cv::COLOR_BGR2RGB);
+
+    // Resize to match model input size
+
+    cv::Mat resizedImage;
+
+    cv::resize(img1, resizedImage, cv::Size(INPUT_WIDTH, INPUT_HEIGHT));
+
+    resizedImage.convertTo(resizedImage, CV_32FC3, 1.0 / 255);
+
+    return resizedImage;
+}
+
+// Function to run inference on YOLOv8 TFLite model
+std::vector<std::tuple<cv::Rect, int, float>> runInference(
+    tflite::Interpreter* interpreter, const cv::Mat& inputImage) {
+
+    // Get input tensor
+    int input_index = interpreter->inputs()[0];
+    float* input_data = interpreter->typed_input_tensor<float>(input_index);
+
+    // Copy image data into model input tensor
+
+    std::memcpy(input_data, inputImage.data, inputImage.total() * inputImage.elemSize());
+    //INPUT_WIDTH * INPUT_HEIGHT * 3 * sizeof(float));
+
+    // Run inference
+    if (interpreter->Invoke() != kTfLiteOk) {
+        std::cerr << "Failed to invoke YOLOv8 model!" << std::endl;
+        return {};
+    }
+    PrintMemoryUsage();
+
+    // // Get output tensor
+
+    std::vector<std::tuple<cv::Rect, int, float>> detections;
+
+    int outputIndex = interpreter->outputs()[0];
+
+    TfLiteTensor* outputTensor = interpreter->tensor(outputIndex);
+
+    float* output_data = outputTensor->data.f;
+
+
+
+    // float* output_data = interpreter->typed_output_tensor<float>(0);
+    TfLiteTensor* output_tensor = interpreter->tensor(outputIndex);
+    int num_boxes = output_tensor->dims->data[1];
+    int num_coords = output_tensor->dims->data[2];
+
+    //Transpsing the Array
+
+
+    std::vector<std::vector<float>> reshaped(num_coords, std::vector<float>(num_boxes));
+
+    for (int i = 0; i < num_coords; i++) {
+        for (int j = 0; j < num_boxes; j++) {
+            reshaped[i][j] = output_data[j * num_coords + i];  // Transpose (switch axes 1 & 2)
+        }
+    }
+    // Process YOLOv8 output
+
+    //Calculating Bounding Boxes
+
+    for (int i = 0; i < num_coords; ++i) {
+        float x = reshaped[i][0];
+
+        float y = reshaped[i][1];
+        float w = reshaped[i][2];
+        float h = reshaped[i][3];
+
+        // Find the class with the highest score
+        float maxScore = -1;
+        int classId = -1;
+        for (int j = 4; j < num_boxes; ++j) {
+            float score = reshaped[i][j];
+            if (score > maxScore) {
+                maxScore = score;
+                classId = j - 4;
+            }
+        }
+
+        if (maxScore > CONF_THRESHOLD) {
+            int x1 = static_cast<int>((x - w / 2) * INPUT_WIDTH);
+            int y1 = static_cast<int>((y - h / 2) * INPUT_HEIGHT);
+            int x2 = static_cast<int>((x + w / 2) * INPUT_WIDTH);
+            int y2 = static_cast<int>((y + h / 2) * INPUT_HEIGHT);
+
+            detections.push_back({ cv::Rect(x1, y1, x2 - x1, y2 - y1), classId, maxScore });
+        }
+    }
+
+    return detections;
+}
+
+// Compute IoU (Intersection over Union)
+float IoU(const cv::Rect& box1, const cv::Rect& box2) {
+    int x1 = std::max(box1.x, box2.x);
+    int y1 = std::max(box1.y, box2.y);
+    int x2 = std::min(box1.x + box1.width, box2.x + box2.width);
+    int y2 = std::min(box1.y + box1.height, box2.y + box2.height);
+
+    int intersection_area = std::max(0, x2 - x1) * std::max(0, y2 - y1);
+    int box1_area = box1.width * box1.height;
+    int box2_area = box2.width * box2.height;
+    int union_area = box1_area + box2_area - intersection_area;
+
+    return union_area > 0 ? static_cast<float>(intersection_area) / union_area : 0.0f;
+}
+
+// Custom NMS function (similar to OpenCV's cv::dnn::NMSBoxes)
+std::vector<int> customNMSBoxes(
+    const std::vector<cv::Rect>& boxes, const std::vector<float>& scores,
+    float conf_threshold, float iou_threshold) {
+
+    std::vector<int> indices;
+    std::vector<std::pair<float, int>> score_index_pairs;
+
+    // Collect valid detections above the confidence threshold
+    for (size_t i = 0; i < boxes.size(); ++i) {
+        if (scores[i] >= conf_threshold) {
+            score_index_pairs.emplace_back(scores[i], i);
+        }
+    }
+
+    // Sort detections by confidence score in descending order
+    std::sort(score_index_pairs.rbegin(), score_index_pairs.rend());
+
+    std::vector<bool> suppressed(boxes.size(), false);
+
+    for (size_t i = 0; i < score_index_pairs.size(); ++i) {
+        int idx1 = score_index_pairs[i].second;
+        if (suppressed[idx1]) continue;
+
+        indices.push_back(idx1);
+
+        for (size_t j = i + 1; j < score_index_pairs.size(); ++j) {
+            int idx2 = score_index_pairs[j].second;
+            if (IoU(boxes[idx1], boxes[idx2]) > iou_threshold) {
+                suppressed[idx2] = true;
+            }
+        }
+    }
+
+    return indices;
+}
+
+// Function to apply Non-Maximum Suppression (NMS)
+std::vector<std::tuple<cv::Rect, int, float>> applyNMS(
+    std::vector<std::tuple<cv::Rect, int, float>>& detections) {
+
+    std::vector<cv::Rect> boxes;
+    std::vector<float> scores;
+    std::vector<int> indices;
+
+    for (const auto& det : detections) {
+        boxes.push_back(std::get<0>(det));
+        scores.push_back(std::get<2>(det));
+    }
+
+    // Apply OpenCV's built-in NMS
+    /*cv::dnn::NMSBoxes(boxes, scores, CONF_THRESHOLD, IOU_THRESHOLD, indices);*/
+
+    indices = customNMSBoxes(boxes, scores, CONF_THRESHOLD, IOU_THRESHOLD);
+
+
+    std::vector<std::tuple<cv::Rect, int, float>> filtered_detections;
+    for (int idx : indices) {
+        filtered_detections.push_back(detections[idx]);
+    }
+
+    return filtered_detections;
+}
+
+// Function to draw detections on image
+void drawDetections(cv::Mat& image,
+    const std::vector<std::tuple<cv::Rect, int, float>>& detections) {
+
+    for (const auto& det : detections) {
+        cv::Rect box = std::get<0>(det);
+        int class_id = std::get<1>(det);
+        float confidence = std::get<2>(det);
+
+        cv::rectangle(image, box, cv::Scalar(0, 255, 0), 2);
+        std::string label = "Class " + std::to_string(class_id) + ": " +
+            std::to_string(confidence);
+        cv::putText(image, label, box.tl(), cv::FONT_HERSHEY_SIMPLEX, 0.5,
+            cv::Scalar(0, 255, 0), 1);
+
+        std::cout << "Class id: " << class_id << " | Condidence: " << confidence << "\n";
+    }
+}
+
+int main() {
+
+
+    const char* model_path = "C:/Users/divjot.s/Downloads/tflite-master/tflite-master/models/classification/best_float16.tflite";
+    const char* image_path = "D:/Frames/Apex_Legends/Frame_apex_legends_[AVTt7dLR0NE]_9490.jpg";
+    PrintMemoryUsage();
+
+    // //ycbcr to rgb
+
+    // cv::Mat ycbcr_image=cv::imread("img.jpg")
+
+    //  // Check if the image is loaded properly
+    // if (ycbcr_image.empty()) {
+    //     std::cerr << "Error: Could not load image!" << std::endl;
+    //     return -1;
+    // }
+
+    // // Convert YCbCr to RGB
+    // cv::Mat rgb_image;
+    // cv::cvtColor(ycbcr_image, rgb_image, cv::COLOR_YCrCb2BGR);
+
+    // Load the model
+  
+        std::unique_ptr<tflite::FlatBufferModel> model =
+            tflite::FlatBufferModel::BuildFromFile(model_path);
+        if (!model) {
+            std::cerr << "Failed to load model!" << std::endl;
+            return 1;
+        }
+
+        PrintMemoryUsage();
+        // Create the interpreter
+
+        tflite::ops::builtin::BuiltinOpResolver resolver;
+        PrintMemoryUsage();
+        std::unique_ptr<tflite::Interpreter> interpreter;
+        if (!interpreter) {
+            std::cout << "Wow" << std::endl;
+        }
+        PrintMemoryUsage();
+        std::cout << interpreter.get() << std::endl;
+        tflite::StderrReporter error_reporter;
+        auto status = tflite::InterpreterBuilder(*model, resolver)(&interpreter);
+        if (status != kTfLiteOk || !interpreter) {
+
+            std::cout << "Failed to create interpreter!" << std::endl;
+            return 1;
+        }
+        interpreter->AllocateTensors();
+        PrintMemoryUsage();
+        cv::Mat image = cv::imread(image_path);
+        if (image.empty()) {
+            std::cerr << "Failed to load image!" << std::endl;
+            return 1;
+        }
+
+        cv::Mat inputImage = preprocessImage(image);
+
+        // Run inference
+        auto detections = runInference(interpreter.get(), inputImage);
+
+        // Apply Non-Maximum Suppression
+        auto filtered_detections = applyNMS(detections);
+
+        // Draw detections
+        drawDetections(image, filtered_detections);
+
+        // Save output
+        cv::imwrite("output.jpg", image);
+    
+
+   /* std::cout << "Memory used by TFLite model: " << interpreter->arena_used_bytes() << " bytes" << std::endl;*/
+
+    // Load and preprocess image
+    
+    return 0;
+}
+
+
+
 std::vector<cv::Rect> boxes;
     std::vector<float> scores;
     std::vector<int> indices;
