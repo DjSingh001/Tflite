@@ -725,6 +725,99 @@ with torch.no_grad():
 print(student_embeddings)
 
 
+#include <windows.h>
+#include <psapi.h>
+#include <iostream>
+#include <string>
+#include <memory>
+#include <opencv2/opencv.hpp>
+#include "tensorflow/lite/model.h"
+#include "tensorflow/lite/interpreter.h"
+#include "tensorflow/lite/kernels/register.h"
+//#include "tensorflow/lite/c/common.h"
+#include "tensorflow/lite/c/c_api_internal.h"
+#include "tensorflow/lite/optional_debug_tools.h"
+
+
+
+int main() {
+
+
+    const char* model_path = "C:/Users/divjot.s/Downloads/tflite-master/tflite-master/models/classification/best_float16.tflite";
+    const char* image_path = "D:/Frames/Apex_Legends/Frame_apex_legends_[AVTt7dLR0NE]_9490.jpg";
+    PrintMemoryUsage();
+
+    // //ycbcr to rgb
+
+    // cv::Mat ycbcr_image=cv::imread("img.jpg")
+
+    //  // Check if the image is loaded properly
+    // if (ycbcr_image.empty()) {
+    //     std::cerr << "Error: Could not load image!" << std::endl;
+    //     return -1;
+    // }
+
+    // // Convert YCbCr to RGB
+    // cv::Mat rgb_image;
+    // cv::cvtColor(ycbcr_image, rgb_image, cv::COLOR_YCrCb2BGR);
+
+    // Load the model
+  
+        std::unique_ptr<tflite::FlatBufferModel> model =
+            tflite::FlatBufferModel::BuildFromFile(model_path);
+        if (!model) {
+            std::cerr << "Failed to load model!" << std::endl;
+            return 1;
+        }
+
+        PrintMemoryUsage();
+        // Create the interpreter
+
+        tflite::ops::builtin::BuiltinOpResolver resolver;
+        PrintMemoryUsage();
+        std::unique_ptr<tflite::Interpreter> interpreter;
+        if (!interpreter) {
+            std::cout << "Wow" << std::endl;
+        }
+        PrintMemoryUsage();
+        std::cout << interpreter.get() << std::endl;
+        tflite::StderrReporter error_reporter;
+        auto status = tflite::InterpreterBuilder(*model, resolver)(&interpreter);
+        if (status != kTfLiteOk || !interpreter) {
+
+            std::cout << "Failed to create interpreter!" << std::endl;
+            return 1;
+        }
+        interpreter->AllocateTensors();
+        PrintMemoryUsage();
+        cv::Mat image = cv::imread(image_path);
+        if (image.empty()) {
+            std::cerr << "Failed to load image!" << std::endl;
+            return 1;
+        }
+
+        cv::Mat inputImage = preprocessImage(image);
+
+        // Run inference
+        auto detections = runInference(interpreter.get(), inputImage);
+
+        // Apply Non-Maximum Suppression
+        auto filtered_detections = applyNMS(detections);
+
+        // Draw detections
+        drawDetections(image, filtered_detections);
+
+        // Save output
+        cv::imwrite("output.jpg", image);
+    
+
+   /* std::cout << "Memory used by TFLite model: " << interpreter->arena_used_bytes() << " bytes" << std::endl;*/
+
+    // Load and preprocess image
+    
+    return 0;
+}
+
 
 
 
