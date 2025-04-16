@@ -1,3 +1,47 @@
+import numpy as np
+import tensorflow as tf
+from PIL import Image
+from torchvision import transforms
+
+# Load TFLite model and allocate tensors
+interpreter = tf.lite.Interpreter(model_path="byobnet.tflite")
+interpreter.allocate_tensors()
+
+# Get input and output tensor details
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+print(input_details[0]['shape'])
+
+# Define preprocessing (must match training and PyTorch transform)
+transform = transforms.Compose([
+    transforms.Resize((256, 256)),
+    transforms.ToTensor(),
+])
+
+# Load and preprocess the image
+image_path = r"D:\Mobile_Vit\embedding_dataset\black_myth_wukong_[0jFxQF4HPfM]_90055.jpg"
+image = Image.open(image_path).convert("RGB")
+image_tensor = transform(image).unsqueeze(0).numpy()  # Shape: (1, 3, 224, 224)
+
+# If model expects NHWC format (most TFLite models do), transpose
+if input_details[0]['shape'][1] == 256 and input_details[0]['shape'][3] == 3:
+    image_tensor = np.transpose(image_tensor, (0, 2, 3, 1))  # Convert NCHW to NHWC
+
+# Convert to expected dtype
+image_tensor = image_tensor.astype(input_details[0]['dtype'])
+
+# Set the input tensor
+interpreter.set_tensor(input_details[0]['index'], image_tensor)
+
+# Run inference
+interpreter.invoke()
+
+# Get the output tensor (assuming single output)
+output_data = interpreter.get_tensor(output_details[0]['index'])  # Shape: (1, 512)
+print("TFLite Embeddings Shape:", output_data.shape)
+print(output_data.squeeze())
+
 import torch
 import torch.nn as nn
 import os
