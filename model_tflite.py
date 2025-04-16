@@ -1,3 +1,60 @@
+import torch
+import torch.nn as nn
+import os
+from torchvision import transforms
+from PIL import Image
+import timm
+import numpy as np
+from safetensors.torch import load_file
+import plotly.express as px
+from sklearn.manifold import TSNE
+import psutil
+import time
+os.environ["TRANSFORMER_OFFLINE"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+
+# Save the original torch.load function
+_original_torch_load = torch.load
+
+# Define a new function that forces weights_only=False
+def custom_torch_load(*args, **kwargs):
+    if "weights_only" not in kwargs:
+        kwargs["weights_only"] = False
+    return _original_torch_load(*args, **kwargs)
+
+# Override torch.load globally
+torch.load = custom_torch_load
+
+mobilevit = torch.load("distilled_mobilevit_full.pth")
+mobilevit = mobilevit.to("cpu").eval()
+
+# Define Projection Layer (384 → 512)
+projection_layer = nn.Linear(384, 512).to("cpu")
+
+
+# Define preprocessing transform (same as used in training)
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    # transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+])
+
+image_path = r"C:\Users\parmar.het\Desktop\black_myth_wukong_[0jFxQF4HPfM]_90055.jpg"
+
+image = Image.open(image_path).convert("RGB")
+print(type(image))
+image_tensor = transform(image).unsqueeze(0).to("cpu")  # Shape: (1, 3, 224, 224)
+
+# Extract embeddings using distilled MobileViT
+with torch.no_grad():
+    student_embeddings = mobilevit.forward_features(image_tensor)
+    student_embeddings = mobilevit.forward_head(student_embeddings, pre_logits=True)  # Shape: (1, 384)
+    student_embeddings = projection_layer(student_embeddings).squeeze().cpu().numpy()  # Shape: (512,)
+
+
+print(student_embeddings)
+
+
 #include <windows.h>
 #include <psapi.h>
 #include <iostream>
