@@ -1,3 +1,82 @@
+
+#include <iostream>
+#include <opencv2/opencv.hpp>
+#include "tensorflow/lite/interpreter.h"
+#include "tensorflow/lite/kernels/register.h"
+#include "tensorflow/lite/model.h"
+
+int main() {
+    // Load model
+    const char* model_path = "D:/Mobile_Vit/byobnet.tflite";
+    std::unique_ptr<tflite::FlatBufferModel> model = tflite::FlatBufferModel::BuildFromFile(model_path);
+    if (!model) {
+        std::cerr << "Failed to load model\n";
+        return -1;
+    }
+
+    // Build interpreter
+    tflite::ops::builtin::BuiltinOpResolver resolver;
+    std::unique_ptr<tflite::Interpreter> interpreter;
+    tflite::InterpreterBuilder(*model, resolver)(&interpreter);
+    if (!interpreter) {
+        std::cerr << "Failed to create interpreter\n";
+        return -1;
+    }
+
+    // Allocate tensors
+    if (interpreter->AllocateTensors() != kTfLiteOk) {
+        std::cerr << "Failed to allocate tensors\n";
+        return -1;
+    }
+
+    // Get input details
+    int input_index = interpreter->inputs()[0];
+    TfLiteTensor* input_tensor = interpreter->tensor(input_index);
+    auto input_dims = input_tensor->dims;
+    int height = input_dims->data[1];
+    int width = input_dims->data[2];
+    int channels = input_dims->data[3];
+
+    // Load image with OpenCV
+    std::string image_path = "D:/Mobile_Vit/embedding_dataset/black_myth_wukong_[0jFxQF4HPfM]_90055.jpg";
+    cv::Mat img = cv::imread(image_path);
+    if (img.empty()) {
+        std::cerr << "Failed to read image\n";
+        return -1;
+    }
+
+    // Resize and convert to float32
+    cv::resize(img, img, cv::Size(width, height));
+    img.convertTo(img, CV_32FC3, 1.0f / 255.0f); // Normalize [0, 1]
+
+    // NHWC layout: [1, height, width, channels]
+    float* input_data = interpreter->typed_tensor<float>(input_index);
+    std::memcpy(input_data, img.data, sizeof(float) * height * width * channels);
+
+    // Run inference
+    if (interpreter->Invoke() != kTfLiteOk) {
+        std::cerr << "Failed to run inference\n";
+        return -1;
+    }
+
+    // Get output
+    int output_index = interpreter->outputs()[0];
+    float* output_data = interpreter->typed_output_tensor<float>(0);
+
+    // Get output shape
+    TfLiteTensor* output_tensor = interpreter->tensor(output_index);
+    int output_size = output_tensor->bytes / sizeof(float);
+
+    std::cout << "TFLite Embeddings Shape: [1, " << output_size << "]\n";
+    for (int i = 0; i < output_size; ++i) {
+        std::cout << output_data[i] << " ";
+    }
+    std::cout << std::endl;
+
+    return 0;
+}
+
+
 import numpy as np
 import tensorflow as tf
 from PIL import Image
