@@ -1,3 +1,21 @@
+[general]
+profile = profile.PontusM
+
+############################################################################################
+[profile.PontusM]
+repos = repo.local_PontusM, repo.product_PontusM, repo.base_PontusM
+buildroot = ~/GBS-ROOT-DJ-2025
+
+[repo.local_PontusM]
+url=~/GBS-ROOT-DJ-2025/local/repos/
+
+[repo.base_PontusM]
+url=http://repos.vd.sec.samsung.net/base/tizen-9.0-base/standard/latest/
+
+[repo.product_PontusM]
+url=http://repos.vd.sec.samsung.net/products/tv/official/2025/TRUNK2025/RoseP_ATSC/latest/repos/product/armv7l/packages/
+
+
 
 #include <iostream>
 #include <opencv2/opencv.hpp>
