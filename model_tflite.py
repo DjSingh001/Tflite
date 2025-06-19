@@ -1,3 +1,42 @@
+mobilevit = timm.create_model(
+    'mobilevitv2_075.cvnets_in1k',
+    pretrained=False,
+    num_classes=0  # Remove classifier
+)
+
+model_path = r"mobilevitv2_075.cvnets_in1k\model.safetensors"  # Change to "pytorch_model.bin" if using bin file
+if model_path.endswith(".safetensors"):
+    state_dict = load_file(model_path)  # Load from safetensors
+else:
+    state_dict = torch.load(model_path, map_location="cpu")  # Load from bin file
+
+# Remove classifier layer keys
+filtered_state_dict = {k: v for k, v in state_dict.items() if not k.startswith("head.fc")}
+mobilevit.load_state_dict(filtered_state_dict, strict=False)  # Allow missing keys
+
+mobilevit.eval()
+
+
+
+data_config = timm.data.resolve_model_data_config(mobilevit)
+transforms = timm.data.create_transform(**data_config, is_training=False)
+
+# Define Projection Layer (384 → 512)
+projection_layer = nn.Sequential(
+    nn.Linear(384, 512),
+    nn.GELU(),
+    nn.Linear(512, 768)
+).to("cpu")
+
+# Load saved model
+checkpoint = torch.load("response_based_distilled_mobilevit_best.pth")
+mobilevit.load_state_dict(checkpoint["mobilevit_state_dict"])
+projection_layer.load_state_dict(checkpoint["projection_layer_state_dict"])
+
+# Set models to evaluation mode
+mobilevit.eval()
+
+
 <unknown>:0: note: loc(callsite(callsite(fused["Transpose:", "onnx_tf_prefix_/model/stages/stages.4/stages.4.1/Transpose_1@__inference___call___3040"] at fused["StatefulPartitionedCall:", "StatefulPartitionedCall@__inference_signature_wrapper_3421"]) at fused["StatefulPartitionedCall:", "StatefulPartitionedCall"])): Error code: ERROR_NEEDS_FLEX_OPS
 <unknown>:0: error: failed while converting: 'main':
 Some ops are not supported by the native TFLite runtime, you can enable TF kernels fallback using TF Select. See instructions: https://www.tensorflow.org/lite/guide/ops_select
