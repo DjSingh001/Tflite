@@ -1,3 +1,13 @@
+<unknown>:0: note: loc(callsite(callsite(fused["Transpose:", "onnx_tf_prefix_/model/stages/stages.4/stages.4.1/Transpose_1@__inference___call___3040"] at fused["StatefulPartitionedCall:", "StatefulPartitionedCall@__inference_signature_wrapper_3421"]) at fused["StatefulPartitionedCall:", "StatefulPartitionedCall"])): Error code: ERROR_NEEDS_FLEX_OPS
+<unknown>:0: error: failed while converting: 'main':
+Some ops are not supported by the native TFLite runtime, you can enable TF kernels fallback using TF Select. See instructions: https://www.tensorflow.org/lite/guide/ops_select
+TF Select ops: Transpose
+Details:
+        tf.Transpose(tensor<?x144x2x2x8x8xf32>, tensor<6xi32>) -> (tensor<?x144x8x2x8x2xf32>) : {device = ""}
+
+
+
+
 [general]
 profile = profile.PontusM
 
