@@ -1,3 +1,13 @@
+TypeError: Exception encountered when calling layer "lambda" (type Lambda).
+
+Expected int32 passed to parameter 'size' of op 'ResizeBilinear', got <KerasTensor: shape=(2,) dtype=int32 inferred_value=[None, None] (created by layer 'tf.cast')> of type 'KerasTensor' instead. Error: You are passing KerasTensor(type_spec=TensorSpec(shape=(2,), dtype=tf.int32, name=None), inferred_value=[None, None], name='tf.cast/Cast:0', description="created by layer 'tf.cast'"), an intermediate Keras symbolic input/output, to a TF API that does not allow registering custom dispatchers, such as `tf.cond`, `tf.function`, gradient tapes, or `tf.map_fn`. Keras Functional model construction only supports TF API calls that *do* support dispatching, such as `tf.math.add` or `tf.reshape`. Other APIs cannot be called directly on symbolic Kerasinputs/outputs. You can work around this limitation by putting the operation in a custom Keras layer `call` and calling that layer on this symbolic input/output.
+
+Call arguments received by layer "lambda" (type Lambda):
+  • inputs=tf.Tensor(shape=(None, 9, 9, 384), dtype=float32)
+  • mask=None
+  • training=None
+
+
 mobilevit = timm.create_model(
     'mobilevitv2_075.cvnets_in1k',
     pretrained=False,
